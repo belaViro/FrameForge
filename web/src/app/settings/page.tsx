@@ -210,6 +210,12 @@ export default function SettingsPage() {
               />
             </div>
           </div>
+          <TtsPreview
+            voice={settings.tts_voice}
+            rate={settings.tts_rate}
+            pitch={settings.tts_pitch}
+            volume={settings.tts_volume}
+          />
         </section>
 
         {/* 视频配置 */}
@@ -272,6 +278,68 @@ export default function SettingsPage() {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function TtsPreview({
+  voice,
+  rate,
+  pitch,
+  volume,
+}: {
+  voice: string;
+  rate: string;
+  pitch: string;
+  volume: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [text, setText] = useState("你好，这是一段语音试听示例。AI 智能体可以帮你完成很多任务。");
+
+  async function handlePreview() {
+    setLoading(true);
+    setAudioUrl(null);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice, rate, pitch, volume }),
+      });
+      if (!res.ok) {
+        alert("试听失败，请确认 Worker 已启动");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-100">
+      <label className="block text-sm font-medium text-gray-700 mb-2">试听</label>
+      <div className="flex gap-2 mb-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="输入试听文本..."
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+        />
+        <button
+          onClick={handlePreview}
+          disabled={loading || !text.trim()}
+          className="px-4 py-2 bg-gray-800 text-white text-sm rounded-md hover:bg-gray-900 disabled:opacity-50 whitespace-nowrap"
+        >
+          {loading ? "生成中..." : "试听"}
+        </button>
+      </div>
+      {audioUrl && (
+        <audio controls src={audioUrl} className="w-full mt-2" autoPlay />
+      )}
     </div>
   );
 }
