@@ -1,0 +1,79 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Episode {
+  id          Int          @id @default(autoincrement())
+  number      Int          @unique
+  title       String
+  hook        String       @default("")
+  analogy     String       @default("")
+  season      Int          @default(1)
+  status      String       @default("draft")
+  imageDir    String       @default("")
+  outputName  String       @default("")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  scenes      Scene[]
+  builds      BuildTask[]
+  ttsConfig   TtsConfig?
+  videoConfig VideoConfig?
+}
+
+model Scene {
+  id        Int      @id @default(autoincrement())
+  episodeId Int
+  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  order     Int
+  image     String   @default("")
+  narration String   @default("")
+  subtitle  String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([episodeId, order])
+}
+
+model TtsConfig {
+  id        Int     @id @default(autoincrement())
+  episodeId Int     @unique
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  voice     String  @default("zh-CN-YunxiNeural")
+  rate      String  @default("-8%")
+  pitch     String  @default("-3Hz")
+  volume    String  @default("+0%")
+}
+
+model VideoConfig {
+  id               Int     @id @default(autoincrement())
+  episodeId        Int     @unique
+  episode          Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  width            Int     @default(1920)
+  height           Int     @default(1080)
+  fps              Int     @default(30)
+  silenceDuration  Float   @default(0.28)
+  zoomEnd          Float   @default(1.035)
+  burnSubtitles    Boolean @default(true)
+  subtitleFont     String  @default("Microsoft YaHei")
+  subtitleFontSize Int     @default(46)
+}
+
+model BuildTask {
+  id         String    @id @default(uuid())
+  episodeId  Int
+  episode    Episode   @relation(fields: [episodeId], references: [id])
+  status     String    @default("queued")
+  progress   Float     @default(0)
+  stage      String    @default("")
+  log        String    @default("")
+  error      String    @default("")
+  outputPath String    @default("")
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+}

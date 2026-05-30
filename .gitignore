@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.next/
+
+# Build artifacts
+web/.next/
+web/out/
+build_*/
+*.cpython-*.pyc
+
+# Database
+data/dashboard.db
+
+# Environment
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output videos (too large for git)
+out/*.mp4
+
+# Temp
+*.tmp

@@ -1,0 +1,14 @@
+[project]
+name = "video-worker"
+version = "0.1.0"
+description = "FastAPI worker for video production pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sse-starlette>=2.0.0",
+    "edge-tts>=6.1.0",
+    "imageio-ffmpeg>=0.5.1",
+    "Pillow>=10.0.0",
+    "openai>=1.0.0",
+]
