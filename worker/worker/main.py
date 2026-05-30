@@ -43,6 +43,26 @@ class TtsPreviewRequest(BaseModel):
     volume: str = "+0%"
 
 
+class GenerateScriptRequest(BaseModel):
+    title: str
+    hook: str = ""
+    analogy: str = ""
+    scene_count: int = 8
+    base_url: str | None = None
+    api_key: str = ""
+    model: str = "gpt-4o"
+
+
+class GenerateImageRequest(BaseModel):
+    prompt: str
+    output_dir: str
+    filename: str
+    base_url: str | None = None
+    api_key: str = ""
+    model: str = "gpt-image-1"
+    size: str = "1536x1024"
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -168,3 +188,77 @@ async def _run_build(task_id: str, config: dict[str, Any]) -> None:
     except Exception as e:
         task["status"] = "failed"
         task["error"] = str(e)
+
+
+@app.post("/generate/script")
+async def generate_script(req: GenerateScriptRequest):
+    from openai import OpenAI
+
+    if not req.api_key:
+        raise HTTPException(400, "API key is required")
+
+    client = OpenAI(api_key=req.api_key, base_url=req.base_url or None)
+
+    system_prompt = """你是一个短视频科普脚本编剧。用户会给你一个视频主题，你需要生成适合 60 秒科普短视频的分场景脚本。
+
+要求：
+1. 输出 JSON 数组，每个元素包含 subtitle（简短场景标题，10字以内）和 narration（该场景的旁白文本，50-100字）
+2. 第一个场景是钩子/开场，最后一个场景是总结
+3. 语言口语化、通俗易懂，适合普通观众
+4. 每个场景的旁白要能独立成段，朗读时长约 5-8 秒
+5. 只输出 JSON 数组，不要其他内容"""
+
+    user_prompt = f"主题：{req.title}"
+    if req.hook:
+        user_prompt += f"\n钩子：{req.hook}"
+    if req.analogy:
+        user_prompt += f"\n核心类比：{req.analogy}"
+    user_prompt += f"\n场景数量：{req.scene_count} 个"
+
+    response = client.chat.completions.create(
+        model=req.model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.7,
+    )
+
+    content = response.choices[0].message.content.strip()
+    # Strip markdown code fences if present
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+    scenes = json.loads(content)
+    return {"scenes": scenes}
+
+
+@app.post("/generate/image")
+async def generate_image(req: GenerateImageRequest):
+    import base64
+    from openai import OpenAI
+
+    if not req.api_key:
+        raise HTTPException(400, "API key is required")
+
+    client = OpenAI(api_key=req.api_key, base_url=req.base_url or None)
+
+    output_dir = Path(req.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / req.filename
+
+    response = client.images.generate(
+        model=req.model,
+        prompt=req.prompt,
+        size=req.size,
+        n=1,
+        response_format="b64_json",
+    )
+
+    image_data = response.data[0].b64_json
+    output_path.write_bytes(base64.b64decode(image_data))
+
+    return {"path": str(output_path), "filename": req.filename}

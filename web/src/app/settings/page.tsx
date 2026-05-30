@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 interface Settings {
   openai_base_url: string;
   openai_api_key: string;
+  llm_model: string;
+  image_model: string;
   tts_voice: string;
   tts_rate: string;
   tts_pitch: string;
@@ -19,6 +21,8 @@ interface Settings {
 const defaults: Settings = {
   openai_base_url: "",
   openai_api_key: "",
+  llm_model: "gpt-4o",
+  image_model: "gpt-image-1",
   tts_voice: "zh-CN-YunxiNeural",
   tts_rate: "-8%",
   tts_pitch: "-3Hz",
@@ -104,6 +108,28 @@ export default function SettingsPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono placeholder:text-gray-400"
               />
               <p className="text-xs text-gray-400 mt-1">密钥仅保存在本地，不会上传到任何远程服务</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">LLM 模型（脚本生成）</label>
+                <input
+                  type="text"
+                  value={settings.llm_model}
+                  onChange={(e) => update("llm_model", e.target.value)}
+                  placeholder="gpt-4o"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">图像模型（配图生成）</label>
+                <input
+                  type="text"
+                  value={settings.image_model}
+                  onChange={(e) => update("image_model", e.target.value)}
+                  placeholder="gpt-image-1"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400"
+                />
+              </div>
             </div>
           </div>
         </section>

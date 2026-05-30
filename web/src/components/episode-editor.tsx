@@ -43,6 +43,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
   const [saving, setSaving] = useState(false);
   const [building, setBuilding] = useState(false);
   const [buildStatus, setBuildStatus] = useState("");
+  const [generating, setGenerating] = useState("");
 
   async function handleSave() {
     setSaving(true);
@@ -64,6 +65,96 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         image: scene.image,
       }),
     });
+  }
+
+  async function handleGenerateScript() {
+    setGenerating("script");
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "script",
+        title,
+        hook,
+        analogy,
+        scene_count: 8,
+      }),
+    });
+    const data = await res.json();
+    setGenerating("");
+
+    if (!res.ok) {
+      alert(data.error || "生成失败");
+      return;
+    }
+
+    // 将生成的场景写入数据库并更新本地状态
+    const generatedScenes: Scene[] = [];
+    for (let i = 0; i < data.scenes.length; i++) {
+      const s = data.scenes[i];
+      const sceneRes = await fetch(`/api/episodes/${episode.id}/scenes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order: i + 1,
+          subtitle: s.subtitle,
+          narration: s.narration,
+          image: "",
+        }),
+      });
+      const saved = await sceneRes.json();
+      generatedScenes.push(saved);
+    }
+    setScenes(generatedScenes);
+  }
+
+  async function handleGenerateImages() {
+    if (scenes.length === 0) {
+      alert("请先生成脚本");
+      return;
+    }
+    setGenerating("images");
+
+    const imageDir = `images_ep${episode.number}`;
+    // 更新 episode 的 imageDir
+    await fetch(`/api/episodes/${episode.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageDir }),
+    });
+
+    const stylePrompt = "手绘白板科普信息图，完整白色背景，横向宽屏课件感，大号手写中文标题，蓝色绿色橙色关键词，高信息密度排版，圆角卡片分区，虚线箭头流程，编号标签，手绘图标，可爱拟人化设备，Q版人物角色，轻松课堂讲义风，马克笔线条，粗黑描边，浅色填充，少量星星和放射线装饰，清晰易懂的科普插画。";
+
+    const updatedScenes = [...scenes];
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
+      const filename = `${String(i + 1).padStart(2, "0")}_${scene.subtitle.replace(/[\\/:*?"<>|]/g, "").slice(0, 20)}.png`;
+      const prompt = `${stylePrompt}\n\n画面主题：${scene.subtitle}\n内容要点：${scene.narration.slice(0, 100)}`;
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "image",
+          prompt,
+          output_dir: imageDir,
+          filename,
+          size: "1536x1024",
+        }),
+      });
+
+      if (res.ok) {
+        updatedScenes[i] = { ...updatedScenes[i], image: filename };
+        // 更新数据库
+        await fetch(`/api/scenes/${scene.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: filename }),
+        });
+      }
+      setScenes([...updatedScenes]);
+    }
+    setGenerating("");
   }
 
   async function handleBuild() {
@@ -163,50 +254,81 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         </button>
       </section>
 
+      {/* AI 生成 */}
+      <section className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+        <h3 className="font-semibold text-gray-900 mb-2">AI 生成</h3>
+        <p className="text-xs text-gray-500 mb-4">根据标题和钩子自动生成脚本，再为每个场景生成配图</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleGenerateScript}
+            disabled={!!generating}
+            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50"
+          >
+            {generating === "script" ? "生成脚本中..." : "AI 生成脚本"}
+          </button>
+          <button
+            onClick={handleGenerateImages}
+            disabled={!!generating || scenes.length === 0}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {generating === "images" ? "生成图片中..." : "AI 生成图片"}
+          </button>
+          {generating && (
+            <span className="text-sm text-gray-500 animate-pulse">
+              {generating === "script" ? "正在调用 LLM 生成分场景脚本..." : "正在逐张生成场景图片..."}
+            </span>
+          )}
+        </div>
+      </section>
+
       {/* 场景列表 */}
       <section className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
         <h3 className="font-semibold text-gray-900 mb-4">场景列表 ({scenes.length} 个)</h3>
-        <div className="space-y-4">
-          {scenes.map((scene, idx) => (
-            <div key={scene.id} className="border border-gray-200 rounded-md p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">
-                  #{scene.order}
-                </span>
-                <input
-                  type="text"
-                  value={scene.subtitle}
-                  onChange={(e) => updateScene(idx, "subtitle", e.target.value)}
-                  onBlur={() => handleSaveScene(scenes[idx])}
-                  placeholder="字幕标签"
-                  className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm"
-                />
-              </div>
-              <div className="grid grid-cols-[200px_1fr] gap-4">
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">图片: {scene.image || "未设置"}</p>
-                  {scene.image && (
-                    <img
-                      src={`/api/files/${episode.imageDir}/${scene.image}`}
-                      alt={scene.subtitle}
-                      className="w-full rounded border border-gray-200"
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">旁白文本</label>
-                  <textarea
-                    value={scene.narration}
-                    onChange={(e) => updateScene(idx, "narration", e.target.value)}
+        {scenes.length === 0 ? (
+          <p className="text-sm text-gray-500">暂无场景，点击上方"AI 生成脚本"自动创建</p>
+        ) : (
+          <div className="space-y-4">
+            {scenes.map((scene, idx) => (
+              <div key={scene.id} className="border border-gray-200 rounded-md p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">
+                    #{scene.order}
+                  </span>
+                  <input
+                    type="text"
+                    value={scene.subtitle}
+                    onChange={(e) => updateScene(idx, "subtitle", e.target.value)}
                     onBlur={() => handleSaveScene(scenes[idx])}
-                    rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm resize-y"
+                    placeholder="字幕标签"
+                    className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm"
                   />
                 </div>
+                <div className="grid grid-cols-[200px_1fr] gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">图片: {scene.image || "未生成"}</p>
+                    {scene.image && episode.imageDir && (
+                      <img
+                        src={`/api/files/${episode.imageDir}/${scene.image}`}
+                        alt={scene.subtitle}
+                        className="w-full rounded border border-gray-200"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">旁白文本</label>
+                    <textarea
+                      value={scene.narration}
+                      onChange={(e) => updateScene(idx, "narration", e.target.value)}
+                      onBlur={() => handleSaveScene(scenes[idx])}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm resize-y"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 构建操作 */}
@@ -215,7 +337,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         <div className="flex items-center gap-4">
           <button
             onClick={handleBuild}
-            disabled={building}
+            disabled={building || scenes.length === 0}
             className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:opacity-50"
           >
             {building ? "构建中..." : "开始构建"}
