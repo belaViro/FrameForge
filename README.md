@@ -1,53 +1,54 @@
 # FrameForge
 
-A full-stack video production dashboard for creating explainer videos from static images. Upload hand-drawn infographics, write narration scripts, and generate polished videos with TTS voiceover, Ken Burns zoom effects, and burned-in subtitles — all from a web UI.
+全栈视频生产管理后台 — 从静态图片一键生成科普讲解视频。上传手绘信息图、编写旁白脚本，自动合成带 TTS 配音、Ken Burns 缩放动效和烧录字幕的成品视频，全程在浏览器中完成。
 
-## Architecture
+## 系统架构
 
 ```
 ┌────────────────────────────────────────────┐
-│  Next.js App (port 3000)                   │
-│  React frontend + REST API + SQLite        │
+│  Next.js 前端 + API (port 3000)            │
+│  React 界面 / REST API / SQLite 数据库      │
 └─────────────────────┬──────────────────────┘
                       │ HTTP / SSE
 ┌─────────────────────▼──────────────────────┐
 │  Python Worker (port 8787)                 │
-│  FastAPI + Edge TTS + FFmpeg pipeline      │
+│  FastAPI / Edge TTS / FFmpeg 视频流水线     │
 └────────────────────────────────────────────┘
 ```
 
-## Features
+## 核心功能
 
-- **Episode Management** — Create, edit, and organize video episodes by season
-- **Scene Editor** — Drag-and-drop scene ordering, inline narration editing, image upload
-- **One-Click Build** — Trigger TTS + video rendering from the browser
-- **Real-Time Progress** — SSE-powered live build status with stage indicators
-- **Video Preview** — Watch generated videos directly in the dashboard
-- **Asset Browser** — Browse all images, audio segments, and output files
-- **Cover Generation** — Generate vertical covers via OpenAI image API
+- **选题管理** — 创建、编辑、按季分组管理视频选题
+- **场景编辑器** — 拖拽排序场景、行内编辑旁白、上传图片
+- **一键构建** — 在浏览器中触发 TTS 生成 + 视频渲染
+- **实时进度** — 基于 SSE 的构建进度推送，阶段可视化
+- **视频预览** — 构建完成后直接在后台播放成片
+- **素材浏览** — 浏览所有图片、音频片段和输出文件
+- **封面生成** — 通过 OpenAI 兼容接口生成竖版封面
+- **API 密钥管理** — 在设置页面配置 Base URL 和 Key，本地持久化
 
-## Tech Stack
+## 技术栈
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 16, React 19, Tailwind CSS |
-| Database | SQLite via Prisma ORM |
-| Backend API | Next.js API Routes |
-| Video Worker | Python, FastAPI, Edge TTS, FFmpeg |
-| Progress | Server-Sent Events (SSE) |
+| 层级 | 技术选型 |
+|------|---------|
+| 前端 | Next.js 16、React 19、Tailwind CSS |
+| 数据库 | SQLite + Prisma ORM |
+| 后端 API | Next.js API Routes |
+| 视频 Worker | Python、FastAPI、Edge TTS、FFmpeg |
+| 进度推送 | Server-Sent Events (SSE) |
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 环境要求
 
 - Node.js 20+
 - Python 3.11+
-- FFmpeg (auto-provided via `imageio-ffmpeg`)
+- FFmpeg（通过 `imageio-ffmpeg` 自动提供，无需手动安装）
 
-### 1. Install dependencies
+### 1. 安装依赖
 
 ```bash
-# Frontend
+# 前端
 cd web
 npm install
 npx prisma generate
@@ -55,113 +56,119 @@ npx prisma db push
 
 # Worker
 cd ../worker
-pip install fastapi uvicorn[standard] sse-starlette edge-tts imageio-ffmpeg Pillow openai
+pip install fastapi "uvicorn[standard]" sse-starlette edge-tts imageio-ffmpeg Pillow openai
 ```
 
-### 2. Configure environment
+### 2. 配置环境变量
+
+编辑 `web/.env`：
 
 ```bash
-# web/.env
 DATABASE_URL="file:../data/dashboard.db"
 WORKER_URL="http://localhost:8787"
-PROJECT_ROOT="/path/to/your/project"
+PROJECT_ROOT="D:/你的项目路径"
 ```
 
-### 3. Seed the database (optional)
+### 3. 初始化数据（可选）
 
 ```bash
 cd web
 npx tsx prisma/seed.ts
 ```
 
-### 4. Start both services
+### 4. 启动服务
 
 ```bash
-# Terminal 1
+# 终端 1：前端
 cd web && npm run dev
 
-# Terminal 2
+# 终端 2：Worker
 cd worker && python -m uvicorn worker.main:app --port 8787
 ```
 
-Or on Windows, just double-click `start.bat`.
+Windows 用户也可以直接双击 `start.bat` 一键启动。
 
-Open **http://localhost:3000** in your browser.
+打开浏览器访问 **http://localhost:3000**。
 
-## Project Structure
+### 5. 配置 API 密钥
+
+进入 **设置** 页面，填写 OpenAI Base URL 和 API Key（支持任何兼容 OpenAI 接口的服务），点击保存即可。密钥仅存储在本地 `data/settings.json`，不会上传。
+
+## 项目结构
 
 ```
-├── web/                          # Next.js application
+├── web/                          # Next.js 应用
 │   ├── prisma/
-│   │   ├── schema.prisma        # Database schema
-│   │   └── seed.ts              # Data seeder
+│   │   ├── schema.prisma        # 数据库模型定义
+│   │   └── seed.ts              # 数据初始化脚本
 │   ├── src/
-│   │   ├── app/                 # Pages and API routes
-│   │   ├── components/          # React components
-│   │   └── lib/                 # Utilities
-│   └── .env                     # Environment config
+│   │   ├── app/                 # 页面和 API 路由
+│   │   ├── components/          # React 组件
+│   │   └── lib/                 # 工具函数
+│   └── .env                     # 环境变量配置
 │
-├── worker/                       # Python FastAPI service
+├── worker/                       # Python FastAPI 服务
 │   ├── pyproject.toml
 │   └── worker/
-│       └── main.py              # API + task queue + pipeline
+│       └── main.py              # API + 任务队列 + 流水线
 │
-├── make_explainer_video.py       # Core video pipeline (standalone)
-├── generate_cover.py             # Cover image generator
-├── workflow_config_ai_agent.json  # Example workflow config
-└── start.bat                     # Windows launcher
+├── make_explainer_video.py       # 核心视频生成流水线（可独立运行）
+├── generate_cover.py             # 封面图片生成器
+├── workflow_config_ai_agent.json  # 工作流配置示例
+└── start.bat                     # Windows 一键启动脚本
 ```
 
-## How It Works
+## 使用流程
 
-1. **Create an episode** in the dashboard with title, hook, and scenes
-2. **Upload images** for each scene (hand-drawn infographics work great)
-3. **Write narration** text for each scene
-4. **Click Build** — the system generates TTS audio, applies zoom effects to each image, burns subtitles, and muxes everything into a final MP4
-5. **Preview** the result right in the browser
+1. 在后台**创建选题**，填写标题、钩子和核心类比
+2. 为每个场景**上传图片**（手绘白板信息图效果最佳）
+3. 为每个场景**编写旁白**文本
+4. 点击**开始构建** — 系统自动生成 TTS 配音、对图片施加缩放动效、烧录字幕、合成最终 MP4
+5. 在编辑器内**预览**成片
 
-## Video Pipeline
+## 视频生成流水线
 
-The build process runs these steps sequentially:
+构建过程按以下步骤顺序执行：
 
 ```
-Narration text → Edge TTS → Audio segments
-                                    ↓
-Images → Resize/fit → Zoompan → Video segments
-                                    ↓
-Audio + Video + ASS subtitles → Final MP4
+旁白文本 → Edge TTS → 音频片段
+                              ↓
+图片 → 缩放适配 → 慢推动效 → 视频片段
+                              ↓
+音频 + 视频 + ASS 字幕 → 最终 MP4
 ```
 
-- **TTS**: Microsoft Edge TTS with configurable voice, rate, pitch
-- **Video**: Ken Burns slow-zoom effect on each static image
-- **Subtitles**: Auto-split narration into timed ASS subtitle units (max 24 chars)
-- **Caching**: TTS audio is cached — rebuilds skip unchanged scenes
+- **TTS**：Microsoft Edge TTS，可配置语音、语速、音调
+- **视频**：Ken Burns 慢推缩放效果，让静态图片产生动感
+- **字幕**：自动将旁白按标点拆分为定时字幕单元（每行最多 24 字）
+- **缓存**：TTS 音频自动缓存，重新构建时跳过未修改的场景
 
-## API Reference
+## API 参考
 
-### Next.js Routes
+### Next.js 路由
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET/POST | `/api/episodes` | List or create episodes |
-| GET/PUT/DELETE | `/api/episodes/[id]` | Episode CRUD |
-| POST | `/api/episodes/[id]/scenes` | Add scene |
-| PUT/DELETE | `/api/scenes/[id]` | Update or delete scene |
-| POST | `/api/production` | Trigger video build |
-| GET | `/api/production/[taskId]/events` | SSE progress stream |
-| POST | `/api/upload` | Upload image file |
-| GET | `/api/files/[...path]` | Serve local assets |
-| POST | `/api/tts` | Preview TTS audio |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/api/episodes` | 获取列表 / 创建选题 |
+| GET/PUT/DELETE | `/api/episodes/[id]` | 单集 CRUD |
+| POST | `/api/episodes/[id]/scenes` | 添加场景 |
+| PUT/DELETE | `/api/scenes/[id]` | 更新 / 删除场景 |
+| POST | `/api/production` | 触发视频构建 |
+| GET | `/api/production/[taskId]/events` | SSE 进度流 |
+| GET/PUT | `/api/settings` | 读取 / 保存全局设置 |
+| POST | `/api/upload` | 上传图片文件 |
+| GET | `/api/files/[...path]` | 本地文件服务 |
+| POST | `/api/tts` | TTS 语音预览 |
 
-### Worker Routes
+### Worker 路由
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/build` | Start video build |
-| GET | `/build/{id}/events` | SSE progress |
-| POST | `/tts/preview` | Generate TTS preview |
-| GET | `/health` | Health check |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/build` | 启动视频构建 |
+| GET | `/build/{id}/events` | SSE 进度推送 |
+| POST | `/tts/preview` | 生成 TTS 预览音频 |
+| GET | `/health` | 健康检查 |
 
-## License
+## 许可证
 
 MIT

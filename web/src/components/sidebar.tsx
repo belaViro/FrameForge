@@ -19,7 +19,6 @@ export function Sidebar() {
     <aside className="w-56 bg-white border-r border-gray-200 flex flex-col min-h-screen">
       <div className="p-4 border-b border-gray-200">
         <h1 className="text-lg font-bold text-gray-900">视频生产后台</h1>
-        <p className="text-xs text-gray-500 mt-1">AI 科普系列</p>
       </div>
       <nav className="flex-1 p-3 space-y-1">
         {navItems.map((item) => {
