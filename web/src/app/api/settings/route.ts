@@ -5,6 +5,8 @@ import path from "node:path";
 const SETTINGS_DIR = path.resolve(process.cwd(), "..", "data");
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 
+const KEY_FIELDS = ["llm_api_key", "image_api_key"];
+
 async function loadSettings(): Promise<Record<string, unknown>> {
   try {
     const raw = await readFile(SETTINGS_FILE, "utf-8");
@@ -19,14 +21,17 @@ async function saveSettings(data: Record<string, unknown>): Promise<void> {
   await writeFile(SETTINGS_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
 
+function maskKey(key: string): string {
+  if (key.length > 8) return key.slice(0, 3) + "..." + key.slice(-4);
+  return key;
+}
+
 export async function GET() {
   const settings = await loadSettings();
-  // Mask the API key for display (return last 4 chars only)
-  if (settings.openai_api_key && typeof settings.openai_api_key === "string") {
-    const key = settings.openai_api_key;
-    settings.openai_api_key = key.length > 8
-      ? "sk-..." + key.slice(-4)
-      : key;
+  for (const field of KEY_FIELDS) {
+    if (settings[field] && typeof settings[field] === "string") {
+      settings[field] = maskKey(settings[field] as string);
+    }
   }
   return NextResponse.json(settings);
 }
@@ -35,13 +40,14 @@ export async function PUT(req: NextRequest) {
   const body = await req.json();
   const existing = await loadSettings();
 
-  // If the API key looks masked (starts with "sk-..."), keep the old one
-  if (
-    typeof body.openai_api_key === "string" &&
-    body.openai_api_key.startsWith("sk-...") &&
-    existing.openai_api_key
-  ) {
-    body.openai_api_key = existing.openai_api_key;
+  for (const field of KEY_FIELDS) {
+    if (
+      typeof body[field] === "string" &&
+      body[field].includes("...") &&
+      existing[field]
+    ) {
+      body[field] = existing[field];
+    }
   }
 
   await saveSettings(body);
