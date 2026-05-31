@@ -112,6 +112,13 @@ class TestImageRequest(BaseModel):
     model: str = "gpt-image-1"
 
 
+class GenerateMetaRequest(BaseModel):
+    title: str
+    base_url: str | None = None
+    api_key: str = ""
+    model: str = "gpt-4o"
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -294,11 +301,12 @@ async def generate_script(req: GenerateScriptRequest):
     system_prompt = """你是一个短视频科普脚本编剧。用户会给你一个视频主题，你需要生成适合 60 秒科普短视频的分场景脚本。
 
 要求：
-1. 输出 JSON 数组，每个元素包含 subtitle（简短场景标题，10字以内）和 narration（该场景的旁白文本，50-100字）
+1. 输出 JSON 对象，格式为 {"scenes": [...]}，数组每个元素包含 subtitle（简短场景标题，10字以内）和 narration（该场景的旁白文本，50-100字）
 2. 第一个场景是钩子/开场，最后一个场景是总结
 3. 语言口语化、通俗易懂，适合普通观众
 4. 每个场景的旁白要能独立成段，朗读时长约 5-8 秒
-5. 只输出 JSON 数组，不要其他内容"""
+5. narration 中不要使用引号，用「」代替
+6. 只输出 JSON，不要其他内容"""
 
     user_prompt = f"主题：{req.title}"
     if req.hook:
@@ -316,7 +324,8 @@ async def generate_script(req: GenerateScriptRequest):
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=8192,
+            response_format={"type": "json_object"},
         )
     except Exception as e:
         raise HTTPException(500, f"LLM 调用失败: {str(e)[:300]}")
@@ -338,12 +347,20 @@ async def generate_script(req: GenerateScriptRequest):
         content = content.strip()
 
     try:
-        scenes = json.loads(content)
+        parsed = json.loads(content)
     except json.JSONDecodeError:
         raise HTTPException(500, f"LLM 返回的内容不是有效 JSON，请重试。原始内容: {content[:200]}")
 
-    if not isinstance(scenes, list) or len(scenes) == 0:
+    # Accept both {"scenes": [...]} and bare [...]
+    if isinstance(parsed, dict) and "scenes" in parsed:
+        scenes = parsed["scenes"]
+    elif isinstance(parsed, list):
+        scenes = parsed
+    else:
         raise HTTPException(500, f"LLM 返回格式不正确，期望 JSON 数组: {content[:200]}")
+
+    if not isinstance(scenes, list) or len(scenes) == 0:
+        raise HTTPException(500, f"LLM 返回了空场景列表，请重试")
 
     return {"scenes": scenes}
 
@@ -431,6 +448,60 @@ async def generate_style_prompt(req: GenerateStylePromptRequest):
         raise HTTPException(500, "LLM 返回了空内容")
 
     return {"prompt": content}
+
+
+@app.post("/generate/meta")
+async def generate_meta(req: GenerateMetaRequest):
+    from openai import OpenAI
+
+    if not req.api_key:
+        raise HTTPException(400, "API key is required")
+
+    base_url = req.base_url or None
+    if base_url and not base_url.rstrip("/").endswith("/v1"):
+        base_url = base_url.rstrip("/") + "/v1"
+
+    client = OpenAI(api_key=req.api_key, base_url=base_url)
+
+    system_prompt = """你是一个短视频科普策划专家。用户会给你一个视频标题，你需要为这个标题生成：
+1. hook（钩子）：一句吸引观众的开场话术，15-25字，口语化，能引发好奇心
+2. analogy（核心类比）：用一个日常生活中的事物来类比主题，5-15字
+
+要求：
+- 输出 JSON 对象，包含 hook 和 analogy 两个字段
+- 只输出 JSON，不要其他内容"""
+
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=req.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"标题：{req.title}"},
+            ],
+            temperature=0.8,
+            max_tokens=200,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"LLM 调用失败: {str(e)[:200]}")
+
+    content = (response.choices[0].message.content or "").strip()
+    if not content:
+        raise HTTPException(500, "LLM 返回了空内容")
+
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        raise HTTPException(500, f"LLM 返回格式不正确: {content[:200]}")
+
+    return {"hook": result.get("hook", ""), "analogy": result.get("analogy", "")}
+
 
 @app.post("/test/llm")
 async def test_llm(req: TestLlmRequest):

@@ -48,6 +48,9 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
   const [outputName, setOutputName] = useState(episode.outputName);
   const [status, setStatus] = useState(episode.status);
   const [buildTaskId, setBuildTaskId] = useState<string | null>(null);
+  const [sceneCount, setSceneCount] = useState(8);
+  const [coverImage, setCoverImage] = useState("");
+  const [generatingCover, setGeneratingCover] = useState(false);
 
   const [stylePrompt, setStylePrompt] = useState("手绘白板科普信息图，完整白色背景，横向宽屏课件感，大号手写中文标题，蓝色绿色橙色关键词，高信息密度排版，圆角卡片分区，虚线箭头流程，编号标签，手绘图标，可爱拟人化设备，Q版人物角色，轻松课堂讲义风，马克笔线条，粗黑描边，浅色填充，少量星星和放射线装饰，清晰易懂的科普插画。");
   useEffect(() => {
@@ -55,6 +58,37 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
       if (data.image_style_prompt) setStylePrompt(data.image_style_prompt);
     }).catch(() => {});
   }, []);
+
+  const [generatingMeta, setGeneratingMeta] = useState(false);
+
+  async function handleGenerateMeta() {
+    if (!title.trim()) {
+      alert("请先填写标题");
+      return;
+    }
+    setGeneratingMeta(true);
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "meta",
+          title,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.hook) {
+        setHook(data.hook);
+        setAnalogy(data.analogy || "");
+      } else {
+        alert(data.error || "生成失败");
+      }
+    } catch {
+      alert("网络错误");
+    } finally {
+      setGeneratingMeta(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -97,7 +131,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         title,
         hook,
         analogy,
-        scene_count: 8,
+        scene_count: sceneCount,
       }),
     });
     const data = await res.json();
@@ -244,6 +278,41 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
       body: JSON.stringify({ status: "images_ready" }),
     });
     setStatus("images_ready");
+  }
+
+  async function handleGenerateCover() {
+    if (!title.trim()) {
+      alert("请先填写标题");
+      return;
+    }
+    setGeneratingCover(true);
+    try {
+      const imageDir = episode.imageDir || `ep${episode.number}`;
+      const filename = `cover_${Date.now()}.png`;
+      const coverPrompt = `竖屏封面设计（1024x1792），科普短视频封面。\n主题：${title}\n画面中央用超大醒目中文标题写：「${title}」\n${hook ? `小字副标题：${hook}` : ""}\n要求：极简风格，背景用与主题相关的简单图形或图标点缀，纯色或渐变底色，元素少而精，不要复杂场景，文字是主要视觉焦点，整体干净有科技感。`;
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "image",
+          prompt: coverPrompt,
+          output_dir: imageDir,
+          filename,
+          size: "1024x1792",
+        }),
+      });
+      if (res.ok) {
+        setCoverImage(`storage/images/${imageDir}/${filename}`);
+      } else {
+        const data = await res.json();
+        alert(data.error || "封面生成失败");
+      }
+    } catch {
+      alert("网络错误，封面生成失败");
+    } finally {
+      setGeneratingCover(false);
+    }
   }
 
   async function handleBuild() {
@@ -438,32 +507,43 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">钩子</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">钩子 <span className="text-slate-300 font-normal">（可选）</span></label>
               <input
                 type="text"
                 value={hook}
                 onChange={(e) => setHook(e.target.value)}
+                placeholder="吸引观众的开场一句话"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">核心类比</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">核心类比 <span className="text-slate-300 font-normal">（可选）</span></label>
               <input
                 type="text"
                 value={analogy}
                 onChange={(e) => setAnalogy(e.target.value)}
+                placeholder="用什么比喻来解释主题"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-colors"
               />
             </div>
           </div>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          {saving ? "保存中..." : "保存"}
-        </button>
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {saving ? "保存中..." : "保存"}
+          </button>
+          <button
+            onClick={handleGenerateMeta}
+            disabled={generatingMeta || !title.trim()}
+            className="px-4 py-2 border border-slate-200 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          >
+            {generatingMeta ? "生成中..." : "根据标题生成钩子和类比"}
+          </button>
+        </div>
       </section>
 
       {/* AI 生成 */}
@@ -471,6 +551,18 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         <h3 className="font-semibold text-slate-900 mb-1">AI 生成</h3>
         <p className="text-xs text-slate-400 mb-4">根据标题和钩子自动生成脚本，再为每个场景生成配图</p>
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500">场景数</label>
+            <select
+              value={sceneCount}
+              onChange={(e) => setSceneCount(Number(e.target.value))}
+              className="px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            >
+              {[4, 5, 6, 7, 8, 9, 10, 12].map((n) => (
+                <option key={n} value={n}>{n} 个</option>
+              ))}
+            </select>
+          </div>
           <button
             onClick={handleGenerateScript}
             disabled={!!generating}
@@ -575,13 +667,20 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
       {/* 构建操作 */}
       <section className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 mb-4">视频构建</h3>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handleBuild}
             disabled={building || scenes.length === 0}
             className="px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
           >
             {building ? "构建中..." : "开始构建"}
+          </button>
+          <button
+            onClick={handleGenerateCover}
+            disabled={generatingCover || !title.trim()}
+            className="px-4 py-2.5 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
+          >
+            {generatingCover ? "生成封面中..." : "生成竖屏封面"}
           </button>
           {building && (
             <button
@@ -595,6 +694,16 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
             <span className="text-sm text-slate-600">{buildStatus}</span>
           )}
         </div>
+        {coverImage && (
+          <div className="mt-5">
+            <p className="text-xs text-slate-400 mb-2">竖屏封面</p>
+            <img
+              src={`/api/files/${coverImage}`}
+              alt="封面"
+              className="w-48 rounded-lg border border-slate-200"
+            />
+          </div>
+        )}
         {outputName && (
           <div className="mt-5">
             <p className="text-xs text-slate-400 mb-2">最新成片</p>

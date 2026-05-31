@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { WORKER_URL } from "@/lib/utils";
 import { NextRequest, NextResponse } from "next/server";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 export async function GET() {
@@ -67,7 +68,19 @@ export async function POST(req: NextRequest) {
     data: { episodeId, status: "queued" },
   });
 
-  const tts = episode.ttsConfig || { voice: "zh-CN-YunxiNeural", rate: "-8%", pitch: "-3Hz", volume: "+0%" };
+  // Read global settings as fallback for TTS/video config
+  let globalSettings: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(path.resolve(process.cwd(), "data", "settings.json"), "utf-8");
+    globalSettings = JSON.parse(raw);
+  } catch { /* no settings file, use defaults */ }
+
+  const tts = episode.ttsConfig || {
+    voice: (globalSettings.tts_voice as string) || "zh-CN-YunxiNeural",
+    rate: (globalSettings.tts_rate as string) || "-8%",
+    pitch: (globalSettings.tts_pitch as string) || "-3Hz",
+    volume: (globalSettings.tts_volume as string) || "+0%",
+  };
   const video = episode.videoConfig || { width: 1920, height: 1080, fps: 30, silenceDuration: 0.28, zoomEnd: 1.035, burnSubtitles: true, subtitleFont: "Microsoft YaHei", subtitleFontSize: 46 };
 
   const config = {

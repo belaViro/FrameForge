@@ -189,5 +189,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(await res.json());
   }
 
+  if (action === "meta") {
+    if (!config.llm_api_key) {
+      return NextResponse.json(
+        { error: "请先在设置页面配置 LLM API Key" },
+        { status: 400 }
+      );
+    }
+
+    const res = await fetch(`${WORKER_URL}/generate/meta`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: body.title,
+        base_url: config.llm_base_url,
+        api_key: config.llm_api_key,
+        model: config.llm_model,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return NextResponse.json({ error: err }, { status: res.status });
+    }
+    return NextResponse.json(await res.json());
+  }
+
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
