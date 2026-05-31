@@ -1,0 +1,17 @@
+{
+  "tts_voice": "zh-CN-YunxiNeural",
+  "tts_rate": "-8%",
+  "tts_pitch": "-3Hz",
+  "tts_volume": "+0%",
+  "video_width": 1920,
+  "video_height": 1080,
+  "video_fps": 30,
+  "worker_url": "http://localhost:8787",
+  "project_root": "",
+  "llm_base_url": "https://api.tokenrelayapi.com",
+  "llm_api_key": "sk-44be4f2322a1c01d99416a06d96924636c7194bfa9da93c89e5aedbcd39527fc",
+  "llm_model": "claude-opus-4.8",
+  "image_base_url": "https://api.tokenrelayapi.com",
+  "image_api_key": "sk-c4d21f29d8c5d373d37f5e0977ddd55aee07168fe4f9f87a2ffc667df555d6d1",
+  "image_model": "gpt-image-2"
+}

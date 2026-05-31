@@ -1,0 +1,18 @@
+{
+  "tts_voice": "zh-CN-YunxiNeural",
+  "tts_rate": "-8%",
+  "tts_pitch": "-3Hz",
+  "tts_volume": "+0%",
+  "video_width": 1920,
+  "video_height": 1080,
+  "video_fps": 30,
+  "worker_url": "http://localhost:8787",
+  "project_root": "",
+  "llm_base_url": "https://api.tokenrelayapi.com",
+  "llm_api_key": "sk-44be4f2322a1c01d99416a06d96924636c7194bfa9da93c89e5aedbcd39527fc",
+  "llm_model": "claude-opus-4.8",
+  "image_base_url": "https://api.tokenrelayapi.com",
+  "image_api_key": "sk-c4d21f29d8c5d373d37f5e0977ddd55aee07168fe4f9f87a2ffc667df555d6d1",
+  "image_model": "gpt-image-2",
+  "image_style_prompt": "手绘白板科普信息图，完整白色背景，横向宽屏课件感，大号手写中文标题，蓝色绿色橙色关键词，高信息密度排版，圆角卡片分区，虚线箭头流程，编号标签，手绘图标，可爱拟人化设备，Q版人物角色，轻松课堂讲义风，马克笔线条，粗黑描边，浅色填充，少量星星和放射线装饰，清晰易懂的科普插画。"
+}

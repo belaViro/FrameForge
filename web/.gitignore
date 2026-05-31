@@ -36,6 +36,18 @@ yarn-error.log*
 # keep .env as template
 !.env
 
+# Runtime data
+/data/dashboard.db
+/data/worker_tasks.json
+
+# Generated content
+/storage/
+
+# Python
+__pycache__/
+*.pyc
+worker/*.egg-info/
+
 # vercel
 .vercel
 

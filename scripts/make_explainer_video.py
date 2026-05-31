@@ -94,6 +94,20 @@ def run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
+async def run_async(cmd: list[str]) -> None:
+    print(" ".join(str(x) for x in cmd))
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode, cmd, output=b"", stderr=stderr
+        )
+
+
 def ffmpeg() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -127,13 +141,14 @@ async def synth_all(workflow: Workflow, rebuild_tts: bool = False) -> None:
         await synth_scene(workflow, scene, out)
 
 
-def media_duration(path: Path) -> float:
-    proc = subprocess.run(
-        [ffmpeg(), "-hide_banner", "-i", str(path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+async def media_duration(path: Path) -> float:
+    proc = await asyncio.create_subprocess_exec(
+        ffmpeg(), "-hide_banner", "-i", str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    text = proc.stderr.decode("utf-8", errors="ignore")
+    _, stderr = await proc.communicate()
+    text = stderr.decode("utf-8", errors="ignore")
     match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", text)
     if not match:
         raise RuntimeError(f"Cannot read duration for {path}:\n{text}")
@@ -141,8 +156,8 @@ def media_duration(path: Path) -> float:
     return int(h) * 3600 + int(m) * 60 + float(s)
 
 
-def make_silence(path: Path, duration: float) -> None:
-    run(
+async def make_silence(path: Path, duration: float) -> None:
+    await run_async(
         [
             ffmpeg(),
             "-y",
@@ -161,17 +176,17 @@ def make_silence(path: Path, duration: float) -> None:
     )
 
 
-def concat_audio(workflow: Workflow) -> tuple[Path, list[float]]:
+async def concat_audio(workflow: Workflow) -> tuple[Path, list[float]]:
     audio_dir = workflow.build_dir / "audio_segments"
     final_audio = workflow.build_dir / "narration.mp3"
     silence = workflow.build_dir / "pause.mp3"
-    make_silence(silence, workflow.silence_duration)
+    await make_silence(silence, workflow.silence_duration)
 
     durations: list[float] = []
     concat_items: list[Path] = []
     for index in range(1, len(workflow.scenes) + 1):
         item = audio_dir / f"{index:02d}.mp3"
-        durations.append(media_duration(item) + workflow.silence_duration)
+        durations.append(await media_duration(item) + workflow.silence_duration)
         concat_items.extend([item, silence])
 
     list_file = workflow.build_dir / "audio_concat.txt"
@@ -180,7 +195,7 @@ def concat_audio(workflow: Workflow) -> tuple[Path, list[float]]:
             safe = item.resolve().as_posix().replace("'", "'\\''")
             f.write(f"file '{safe}'\n")
 
-    run(
+    await run_async(
         [
             ffmpeg(),
             "-y",
@@ -210,7 +225,7 @@ def contain_image(img: Image.Image, target_w: int, target_h: int) -> Image.Image
     return canvas
 
 
-def render_video(workflow: Workflow, scene_durations: list[float]) -> Path:
+async def render_video(workflow: Workflow, scene_durations: list[float]) -> Path:
     silent_video = workflow.build_dir / "video_silent.mp4"
     still_dir = workflow.build_dir / "scene_stills"
     segment_dir = workflow.build_dir / "video_segments"
@@ -228,7 +243,7 @@ def render_video(workflow: Workflow, scene_durations: list[float]) -> Path:
 
         zoom_delta = max(workflow.zoom_end - 1.0, 0.0)
         zoom = f"1+{zoom_delta:.6f}*on/{max(frame_count - 1, 1)}"
-        run(
+        await run_async(
             [
                 ffmpeg(),
                 "-y",
@@ -264,7 +279,7 @@ def render_video(workflow: Workflow, scene_durations: list[float]) -> Path:
             safe = segment.resolve().as_posix().replace("'", "'\\''")
             f.write(f"file '{safe}'\n")
 
-    run([ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(silent_video)])
+    await run_async([ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(silent_video)])
     return silent_video
 
 
@@ -351,35 +366,18 @@ def write_subtitles(workflow: Workflow, scene_durations: list[float]) -> Path:
     return subtitle_file
 
 
-def mux(workflow: Workflow, video: Path, audio: Path, subtitles: Path | None) -> Path:
+async def mux(workflow: Workflow, video: Path, audio: Path, subtitles: Path | None) -> Path:
     workflow.out_dir.mkdir(parents=True, exist_ok=True)
     out = workflow.out_dir / workflow.output_name
     cmd = [ffmpeg(), "-y", "-i", str(video), "-i", str(audio)]
     if subtitles is not None:
-        try:
-            subtitle_path = subtitles.relative_to(workflow.root).as_posix()
-        except ValueError:
-            subtitle_path = subtitles.as_posix().replace(":", r"\:")
-        cmd.extend(["-vf", f"subtitles='{subtitle_path}'"])
-    cmd.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-preset",
-            "medium",
-            "-crf",
-            "20",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "160k",
-            "-shortest",
-            str(out),
-        ]
-    )
-    run(cmd)
+        sub_path = str(subtitles).replace("\\", "/").replace(":", "\\:")
+        cmd.extend(["-vf", f"ass={sub_path}"])
+    cmd.extend([
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
+        "-c:a", "aac", "-b:a", "160k", "-shortest", str(out),
+    ])
+    await run_async(cmd)
     return out
 
 
@@ -401,12 +399,16 @@ def build(workflow: Workflow, rebuild_tts: bool = False, no_subtitles: bool = Fa
     if dry_run:
         return
 
-    asyncio.run(synth_all(workflow, rebuild_tts=rebuild_tts))
-    audio, durations = concat_audio(workflow)
-    print(f"audio duration: {media_duration(audio):.2f}s")
+    asyncio.run(_build_async(workflow, rebuild_tts, no_subtitles))
+
+
+async def _build_async(workflow: Workflow, rebuild_tts: bool = False, no_subtitles: bool = False) -> None:
+    await synth_all(workflow, rebuild_tts=rebuild_tts)
+    audio, durations = await concat_audio(workflow)
+    print(f"audio duration: {await media_duration(audio):.2f}s")
     subtitles = None if no_subtitles or not workflow.burn_subtitles else write_subtitles(workflow, durations)
-    silent = render_video(workflow, durations)
-    out = mux(workflow, silent, audio, subtitles)
+    silent = await render_video(workflow, durations)
+    out = await mux(workflow, silent, audio, subtitles)
     print(f"done: {out}")
 
 

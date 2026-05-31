@@ -8,11 +8,14 @@ __pycache__/
 web/.next/
 web/out/
 build_*/
-*.cpython-*.pyc
 
 # Database
-data/
-web/data/
+data/dashboard.db
+data/worker_tasks.json
+
+# Content & Output (local media, not app code)
+content/
+output/
 
 # Lock files
 package-lock.json
@@ -25,25 +28,15 @@ package-lock.json
 .DS_Store
 Thumbs.db
 
-# Output videos
-out/
-
-# Local content assets (not part of the app)
-AI智能体*/
-参考风格图片/
-封面/
-5分钟科普视频*.md
-AI智能体科普*.md
-图片风格描述.md
-
 # IDE
 .vscode/
 .idea/
 
 # Temp
 *.tmp
+temp_test/
 
-# Next.js generated
+# AI tooling
+.claude/
 web/AGENTS.md
 web/CLAUDE.md
-.claude/

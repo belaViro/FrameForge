@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -13,11 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-
-from make_explainer_video import Workflow, load_workflow, validate, build  # noqa: E402
-from make_explainer_video import synth_all, concat_audio, render_video, write_subtitles, mux  # noqa: E402
+from pipeline import Workflow, load_workflow, validate, build
+from pipeline import synth_all, concat_audio, render_video, write_subtitles, mux
 
 app = FastAPI(title="Video Production Worker")
 
@@ -28,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TASKS_FILE = PROJECT_ROOT / "data" / "worker_tasks.json"
+TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "worker_tasks.json"
 
 tasks: dict[str, dict[str, Any]] = {}
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -78,6 +74,13 @@ class GenerateScriptRequest(BaseModel):
     hook: str = ""
     analogy: str = ""
     scene_count: int = 8
+    base_url: str | None = None
+    api_key: str = ""
+    model: str = "gpt-4o"
+
+
+class GenerateStylePromptRequest(BaseModel):
+    keyword: str
     base_url: str | None = None
     api_key: str = ""
     model: str = "gpt-4o"
@@ -361,6 +364,46 @@ async def generate_image(req: GenerateImageRequest):
 
     return {"path": str(output_path), "filename": req.filename}
 
+
+@app.post("/generate/style-prompt")
+async def generate_style_prompt(req: GenerateStylePromptRequest):
+    from openai import OpenAI
+
+    if not req.api_key:
+        raise HTTPException(400, "API key is required")
+
+    base_url = req.base_url or None
+    if base_url and not base_url.rstrip("/").endswith("/v1"):
+        base_url = base_url.rstrip("/") + "/v1"
+
+    client = OpenAI(api_key=req.api_key, base_url=base_url)
+
+    system_prompt = """你是一个图片风格提示词专家。用户会给你一个风格关键词或简短描述，你需要生成一段详细的图片生成提示词（prompt），用于指导 AI 图像生成模型生成该风格的科普配图。
+
+要求：
+1. 输出一段连贯的中文描述，约 100-200 字
+2. 包含：整体风格、背景、配色、线条特征、排版方式、装饰元素、人物/图标风格
+3. 适合作为科普短视频配图的风格描述
+4. 只输出提示词文本，不要其他内容"""
+
+    try:
+        response = client.chat.completions.create(
+            model=req.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"风格关键词：{req.keyword}"},
+            ],
+            temperature=0.7,
+            max_tokens=500,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"LLM 调用失败: {str(e)[:200]}")
+
+    content = (response.choices[0].message.content or "").strip()
+    if not content:
+        raise HTTPException(500, "LLM 返回了空内容")
+
+    return {"prompt": content}
 
 @app.post("/test/llm")
 async def test_llm(req: TestLlmRequest):

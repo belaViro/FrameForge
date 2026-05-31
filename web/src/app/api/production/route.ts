@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { WORKER_URL, PROJECT_ROOT } from "@/lib/utils";
+import { WORKER_URL } from "@/lib/utils";
 import { NextRequest, NextResponse } from "next/server";
+import path from "node:path";
 
 export async function GET() {
   const tasks = await prisma.buildTask.findMany({
@@ -32,6 +33,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No scenes configured" }, { status: 400 });
   }
 
+  // Prevent concurrent builds for the same episode
+  const activeBuild = await prisma.buildTask.findFirst({
+    where: {
+      episodeId,
+      status: { in: ["queued", "running"] },
+    },
+  });
+  if (activeBuild) {
+    return NextResponse.json(
+      { error: "该集已有构建任务正在进行中，请等待完成后再试" },
+      { status: 409 }
+    );
+  }
+
+  if (!episode.imageDir) {
+    return NextResponse.json(
+      { error: "该集尚未设置图片目录，请先生成图片" },
+      { status: 400 }
+    );
+  }
+
+  // Check all scenes have images
+  const missingImages = episode.scenes.filter((s) => !s.image);
+  if (missingImages.length > 0) {
+    return NextResponse.json(
+      { error: `有 ${missingImages.length} 个场景缺少图片，请先生成图片` },
+      { status: 400 }
+    );
+  }
+
   const task = await prisma.buildTask.create({
     data: { episodeId, status: "queued" },
   });
@@ -41,9 +72,9 @@ export async function POST(req: NextRequest) {
 
   const config = {
     title: episode.title,
-    image_dir: `${PROJECT_ROOT}/${episode.imageDir}`,
-    build_dir: `${PROJECT_ROOT}/build_ep${episode.number}`,
-    out_dir: `${PROJECT_ROOT}/out`,
+    image_dir: path.resolve(process.cwd(), "storage", "images", episode.imageDir),
+    build_dir: path.resolve(process.cwd(), "storage", "builds", `ep${episode.number}`),
+    out_dir: path.resolve(process.cwd(), "storage", "output"),
     output_name: episode.outputName || `EP${String(episode.number).padStart(2, "0")}_${episode.title}.mp4`,
     video: {
       width: video.width,

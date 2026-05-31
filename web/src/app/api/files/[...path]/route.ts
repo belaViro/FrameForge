@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-const PROJECT_ROOT = process.env.PROJECT_ROOT || "D:/财富密码/视频号/静态图片科普视频";
+const FILE_ROOT = process.cwd();
 
 const MIME_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -20,11 +20,11 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path: segments } = await params;
-  const filePath = path.join(PROJECT_ROOT, ...segments);
+  const filePath = path.join(FILE_ROOT, ...segments);
 
   // Prevent directory traversal
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(PROJECT_ROOT))) {
+  if (!resolved.startsWith(path.resolve(FILE_ROOT))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -6,5 +6,3 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const WORKER_URL = process.env.WORKER_URL || "http://localhost:8787";
-
-export const PROJECT_ROOT = process.env.PROJECT_ROOT || "D:/财富密码/视频号/静态图片科普视频";
