@@ -473,31 +473,34 @@ async def test_image(req: TestImageRequest):
     base_url = (req.base_url or "https://api.openai.com/v1").rstrip("/")
     if not base_url.endswith("/v1"):
         base_url = base_url + "/v1"
-    url = f"{base_url}/models"
+    url = f"{base_url}/images/generations"
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
                 url,
-                headers={"Authorization": f"Bearer {req.api_key}"},
+                headers={
+                    "Authorization": f"Bearer {req.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": req.model,
+                    "prompt": "a white dot on white background",
+                    "size": "1024x1024",
+                    "n": 1,
+                },
             )
         if resp.status_code == 200:
-            data = resp.json()
-            models = data.get("data", [])
-            model_ids = [m.get("id", "") for m in models[:10]]
-            has_target = req.model in model_ids
-            if has_target:
-                return {"message": f"连接正常，模型 {req.model} 可用"}
-            elif model_ids:
-                return {"message": f"连接正常，可用模型: {', '.join(model_ids[:5])}（未找到 {req.model}，但可能仍可用）"}
-            else:
-                return {"message": f"连接正常（API Key 有效）"}
+            return {"message": f"图像生成 API 正常，模型 {req.model} 可用"}
         elif resp.status_code == 401:
             raise HTTPException(500, "认证失败 (401)，请检查 API Key")
         elif resp.status_code == 404:
-            raise HTTPException(500, f"接口不存在 (404)，请检查 Base URL")
+            raise HTTPException(500, f"Images API 不可用 (404)，该服务可能不支持图像生成")
         else:
-            return {"message": f"连接正常（API 返回 {resp.status_code}，模型列表不可用，{req.model} 可能仍可调用）"}
+            body = resp.text[:200]
+            if "not supported" in body.lower() or "not available" in body.lower():
+                raise HTTPException(500, f"该 API Key/服务不支持图像生成: {body[:150]}")
+            raise HTTPException(500, f"API 返回 {resp.status_code}: {body[:150]}")
     except httpx.ConnectError:
         raise HTTPException(500, f"无法连接到 {base_url}")
     except httpx.TimeoutException:
