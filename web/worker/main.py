@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -24,10 +25,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "worker_tasks.json"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TASKS_FILE = PROJECT_ROOT / "data" / "worker_tasks.json"
+MAX_CONCURRENT_BUILDS = 2
 
 tasks: dict[str, dict[str, Any]] = {}
 _running_tasks: dict[str, asyncio.Task] = {}
+_build_semaphore = asyncio.Semaphore(MAX_CONCURRENT_BUILDS)
 
 
 def _load_tasks() -> None:
@@ -115,6 +119,9 @@ async def health():
 
 @app.post("/build")
 async def start_build(req: BuildRequest):
+    active_builds = sum(1 for t in tasks.values() if t["status"] in ("queued", "running"))
+    if active_builds >= MAX_CONCURRENT_BUILDS:
+        raise HTTPException(429, "已达到最大并发构建数，请稍后重试")
     task_id = req.task_id or str(uuid.uuid4())
     tasks[task_id] = {
         "status": "queued",
@@ -206,7 +213,11 @@ async def tts_preview(req: TtsPreviewRequest):
         volume=req.volume,
     )
     tmp = Path(tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name)
-    await communicate.save(str(tmp))
+    try:
+        await communicate.save(str(tmp))
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(500, f"TTS 合成失败: {str(e)[:200]}")
     return FileResponse(
         str(tmp),
         media_type="audio/mpeg",
@@ -219,49 +230,52 @@ async def _run_build(task_id: str, config: dict[str, Any]) -> None:
     task = tasks[task_id]
     task["status"] = "running"
 
-    try:
-        tmp_config = Path(tempfile.mktemp(suffix=".json"))
-        tmp_config.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    async with _build_semaphore:
+        try:
+            fd, tmp_path = tempfile.mkstemp(suffix=".json")
+            os.close(fd)
+            tmp_config = Path(tmp_path)
+            tmp_config.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
-        workflow = load_workflow(tmp_config)
-        validate(workflow)
+            workflow = load_workflow(tmp_config)
+            validate(workflow)
 
-        task["stage"] = "tts"
-        task["progress"] = 0.1
-        await synth_all(workflow)
-        task["progress"] = 0.3
+            task["stage"] = "tts"
+            task["progress"] = 0.1
+            await synth_all(workflow)
+            task["progress"] = 0.3
 
-        task["stage"] = "concat_audio"
-        audio, durations = await concat_audio(workflow)
-        task["progress"] = 0.4
+            task["stage"] = "concat_audio"
+            audio, durations = await concat_audio(workflow)
+            task["progress"] = 0.4
 
-        task["stage"] = "subtitles"
-        subtitles = write_subtitles(workflow, durations) if workflow.burn_subtitles else None
-        task["progress"] = 0.5
+            task["stage"] = "subtitles"
+            subtitles = write_subtitles(workflow, durations) if workflow.burn_subtitles else None
+            task["progress"] = 0.5
 
-        task["stage"] = "render_video"
-        silent = await render_video(workflow, durations)
-        task["progress"] = 0.8
+            task["stage"] = "render_video"
+            silent = await render_video(workflow, durations)
+            task["progress"] = 0.8
 
-        task["stage"] = "mux"
-        out = await mux(workflow, silent, audio, subtitles)
-        task["progress"] = 1.0
+            task["stage"] = "mux"
+            out = await mux(workflow, silent, audio, subtitles)
+            task["progress"] = 1.0
 
-        task["status"] = "completed"
-        task["stage"] = "done"
-        task["output_path"] = str(out)
+            task["status"] = "completed"
+            task["stage"] = "done"
+            task["output_path"] = str(out)
 
-        tmp_config.unlink(missing_ok=True)
+            tmp_config.unlink(missing_ok=True)
 
-    except asyncio.CancelledError:
-        task["status"] = "failed"
-        task["error"] = "用户取消"
-    except Exception as e:
-        task["status"] = "failed"
-        task["error"] = str(e)
-    finally:
-        _running_tasks.pop(task_id, None)
-        _save_tasks()
+        except asyncio.CancelledError:
+            task["status"] = "failed"
+            task["error"] = "用户取消"
+        except Exception as e:
+            task["status"] = "failed"
+            task["error"] = str(e)
+        finally:
+            _running_tasks.pop(task_id, None)
+            _save_tasks()
 
 
 @app.post("/generate/script")
@@ -294,7 +308,8 @@ async def generate_script(req: GenerateScriptRequest):
     user_prompt += f"\n场景数量：{req.scene_count} 个"
 
     try:
-        response = client.chat.completions.create(
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
             model=req.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -347,17 +362,28 @@ async def generate_image(req: GenerateImageRequest):
 
     client = OpenAI(api_key=req.api_key, base_url=base_url)
 
-    output_dir = Path(req.output_dir)
+    # Restrict output_dir to project storage
+    storage_root = PROJECT_ROOT / "storage" / "images"
+    output_dir = (storage_root / req.output_dir).resolve()
+    if not str(output_dir).startswith(str(storage_root.resolve())):
+        raise HTTPException(403, "output_dir 路径不合法")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / req.filename
 
-    response = client.images.generate(
-        model=req.model,
-        prompt=req.prompt,
-        size=req.size,
-        n=1,
-        response_format="b64_json",
-    )
+    try:
+        response = await asyncio.to_thread(
+            client.images.generate,
+            model=req.model,
+            prompt=req.prompt,
+            size=req.size,
+            n=1,
+            response_format="b64_json",
+        )
+    except Exception as e:
+        raise HTTPException(500, f"图像生成 API 调用失败: {str(e)[:300]}")
+
+    if not response.data or not response.data[0].b64_json:
+        raise HTTPException(500, "图像 API 返回了空数据，请重试")
 
     image_data = response.data[0].b64_json
     output_path.write_bytes(base64.b64decode(image_data))
@@ -387,7 +413,8 @@ async def generate_style_prompt(req: GenerateStylePromptRequest):
 4. 只输出提示词文本，不要其他内容"""
 
     try:
-        response = client.chat.completions.create(
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
             model=req.model,
             messages=[
                 {"role": "system", "content": system_prompt},

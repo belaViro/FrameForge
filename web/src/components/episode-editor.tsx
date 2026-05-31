@@ -44,6 +44,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
   const [building, setBuilding] = useState(false);
   const [buildStatus, setBuildStatus] = useState("");
   const [generating, setGenerating] = useState("");
+  const [regenSet, setRegenSet] = useState<Set<string>>(new Set());
   const [outputName, setOutputName] = useState(episode.outputName);
   const [status, setStatus] = useState(episode.status);
   const [buildTaskId, setBuildTaskId] = useState<string | null>(null);
@@ -57,12 +58,21 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
 
   async function handleSave() {
     setSaving(true);
-    await fetch(`/api/episodes/${episode.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, hook, analogy }),
-    });
-    setSaving(false);
+    try {
+      const res = await fetch(`/api/episodes/${episode.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, hook, analogy }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert((data as { error?: string }).error || "保存失败，请重试");
+      }
+    } catch {
+      alert("网络错误，保存失败");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSaveScene(scene: Scene) {
@@ -272,9 +282,25 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
       eventSource.close();
     });
     eventSource.onerror = () => {
-      setBuildStatus("连接中断");
-      setBuilding(false);
       eventSource.close();
+      fetch(`/api/production/${taskId}/status`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((info) => {
+          if (!info) {
+            setBuildStatus("连接中断");
+          } else if (info.status === "completed") {
+            setBuildStatus("构建完成!");
+            const filename = info.output_path?.split(/[/\\]/).pop() || "";
+            if (filename) setOutputName(filename);
+            setStatus("produced");
+          } else if (info.status === "failed") {
+            setBuildStatus(`失败: ${info.error}`);
+          } else {
+            setBuildStatus("连接中断，构建可能仍在进行");
+          }
+        })
+        .catch(() => setBuildStatus("连接中断"));
+      setBuilding(false);
     };
   }
 
@@ -288,7 +314,8 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
 
   async function handleRegenNarration(idx: number) {
     const scene = scenes[idx];
-    setGenerating(`narration-${idx}`);
+    const key = `narration-${idx}`;
+    setRegenSet((s) => new Set(s).add(key));
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -316,7 +343,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         alert(data.error || "重新生成失败");
       }
     } finally {
-      setGenerating("");
+      setRegenSet((s) => { const n = new Set(s); n.delete(key); return n; });
     }
   }
 
@@ -326,7 +353,8 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
       alert("请先填写场景标题或旁白");
       return;
     }
-    setGenerating(`image-${idx}`);
+    const key = `image-${idx}`;
+    setRegenSet((s) => new Set(s).add(key));
     try {
       const imageDir = episode.imageDir || `ep${episode.number}`;
       if (!episode.imageDir) {
@@ -364,7 +392,7 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
         alert(data.error || "图片生成失败");
       }
     } finally {
-      setGenerating("");
+      setRegenSet((s) => { const n = new Set(s); n.delete(key); return n; });
     }
   }
 
@@ -493,11 +521,11 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
                       <p className="text-xs text-slate-400">{scene.image || "未生成"}</p>
                       <button
                         onClick={() => handleRegenImage(idx)}
-                        disabled={!!generating}
+                        disabled={regenSet.has(`image-${idx}`)}
                         title="重新生成图片"
                         className="text-xs text-cyan-600 hover:text-cyan-700 disabled:opacity-40"
                       >
-                        {generating === `image-${idx}` ? "..." : "↻"}
+                        {regenSet.has(`image-${idx}`) ? "..." : "↻"}
                       </button>
                     </div>
                     {scene.image && episode.imageDir && (
@@ -510,10 +538,10 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
                     {!scene.image && (
                       <button
                         onClick={() => handleRegenImage(idx)}
-                        disabled={!!generating}
+                        disabled={regenSet.has(`image-${idx}`)}
                         className="w-full h-24 border border-dashed border-slate-300 rounded-lg text-xs text-slate-400 hover:border-cyan-400 hover:text-cyan-600 disabled:opacity-40 transition-colors"
                       >
-                        {generating === `image-${idx}` ? "生成中..." : "点击生成图片"}
+                        {regenSet.has(`image-${idx}`) ? "生成中..." : "点击生成图片"}
                       </button>
                     )}
                   </div>
@@ -522,11 +550,11 @@ export function EpisodeEditor({ episode }: { episode: Episode }) {
                       <label className="text-xs text-slate-400">旁白文本</label>
                       <button
                         onClick={() => handleRegenNarration(idx)}
-                        disabled={!!generating}
+                        disabled={regenSet.has(`narration-${idx}`)}
                         title="重新生成旁白"
                         className="text-xs text-violet-600 hover:text-violet-700 disabled:opacity-40"
                       >
-                        {generating === `narration-${idx}` ? "生成中..." : "↻ 重写"}
+                        {regenSet.has(`narration-${idx}`) ? "生成中..." : "↻ 重写"}
                       </button>
                     </div>
                     <textarea

@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FrameForge
 
-## Getting Started
+AI 驱动的科普短视频自动化生产工具。从脚本生成、配图绘制、语音合成到视频渲染，一站式完成。
 
-First, run the development server:
+## 功能
+
+- **AI 脚本生成** — 输入主题，LLM 自动拆分为多场景旁白脚本
+- **AI 配图生成** — 根据每个场景内容自动生成风格统一的科普插画
+- **TTS 语音合成** — 使用 Edge TTS 生成自然语音旁白，支持语速/音调调节
+- **视频自动渲染** — Ken Burns 缩放动效 + ASS 字幕烧录 + FFmpeg 合成
+- **构建队列** — 支持异步构建、实时进度推送（SSE）、取消任务
+- **素材管理** — 图片浏览、文件上传、分集管理
+
+## 技术栈
+
+| 层 | 技术 |
+|---|------|
+| 前端 | Next.js 16 + React 19 + Tailwind CSS 4 |
+| 数据库 | Prisma + SQLite |
+| Worker | FastAPI + edge-tts + Pillow + FFmpeg |
+| AI | OpenAI 兼容 API（LLM + 图像生成） |
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 20+
+- Python 3.11+
+- FFmpeg（通过 `imageio-ffmpeg` 自动管理）
+
+### 安装
+
+```bash
+# 前端依赖
+npm install
+npx prisma generate
+
+# Worker 依赖
+cd worker
+pip install -r requirements.txt
+```
+
+### 配置
+
+复制 `.env.example` 为 `.env`，填入数据库路径：
+
+```env
+DATABASE_URL="file:../data/app.db"
+```
+
+API Key 在启动后通过 Settings 页面配置。
+
+### 启动
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+同时启动 Next.js (端口 3000) 和 Worker (端口 8787)。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+浏览器打开 http://localhost:3000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 项目结构
 
-## Learn More
+```
+src/
+├── app/              # Next.js App Router 页面和 API
+├── components/       # React 组件
+└── lib/              # 工具函数、Prisma 客户端
 
-To learn more about Next.js, take a look at the following resources:
+worker/
+├── main.py           # FastAPI 应用（构建、生成、TTS）
+└── pipeline.py       # 视频生产流水线（FFmpeg 渲染）
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+prisma/
+└── schema.prisma     # 数据模型
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+data/                 # 运行时数据（SQLite、配置、任务状态）
+storage/              # 上传文件和生成的图片/视频
+```
 
-## Deploy on Vercel
+## 工作流程
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. 创建分集 → 填写标题和钩子
+2. 点击「AI 生成脚本」→ LLM 输出分场景旁白
+3. 点击「AI 生成图片」→ 逐场景生成配图
+4. 点击「开始构建」→ TTS + 视频渲染 + 字幕合成
+5. 预览成片，导出发布
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+
+MIT

@@ -94,17 +94,24 @@ def run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
-async def run_async(cmd: list[str]) -> None:
+async def run_async(cmd: list[str], cwd: Path | None = None, timeout: float = 300) -> None:
     print(" ".join(str(x) for x in cmd))
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=str(cwd) if cwd else None,
     )
-    _, stderr = await proc.communicate()
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(f"FFmpeg 超时 ({timeout}s): {' '.join(str(x) for x in cmd[:6])}")
     if proc.returncode != 0:
+        err_text = stderr.decode("utf-8", errors="ignore")[-500:]
         raise subprocess.CalledProcessError(
-            proc.returncode, cmd, output=b"", stderr=stderr
+            proc.returncode, cmd, output=b"", stderr=f"FFmpeg error: {err_text}".encode()
         )
 
 
@@ -126,7 +133,12 @@ async def synth_scene(workflow: Workflow, scene: Scene, out_path: Path) -> None:
         pitch=workflow.pitch,
         volume=workflow.volume,
     )
-    await communicate.save(str(out_path))
+    try:
+        await communicate.save(str(out_path))
+    except Exception as e:
+        raise RuntimeError(
+            f"TTS 合成失败 (场景: {scene.subtitle or scene.image}): {e}"
+        ) from e
 
 
 async def synth_all(workflow: Workflow, rebuild_tts: bool = False) -> None:
@@ -186,14 +198,16 @@ async def concat_audio(workflow: Workflow) -> tuple[Path, list[float]]:
     concat_items: list[Path] = []
     for index in range(1, len(workflow.scenes) + 1):
         item = audio_dir / f"{index:02d}.mp3"
+        if not item.exists() or item.stat().st_size < 100:
+            raise FileNotFoundError(f"音频片段缺失或损坏: {item.name} (场景 {index})")
         durations.append(await media_duration(item) + workflow.silence_duration)
         concat_items.extend([item, silence])
 
     list_file = workflow.build_dir / "audio_concat.txt"
     with list_file.open("w", encoding="utf-8") as f:
         for item in concat_items:
-            safe = item.resolve().as_posix().replace("'", "'\\''")
-            f.write(f"file '{safe}'\n")
+            rel = item.relative_to(workflow.build_dir)
+            f.write(f"file '{rel.as_posix()}'\n")
 
     await run_async(
         [
@@ -210,7 +224,8 @@ async def concat_audio(workflow: Workflow) -> tuple[Path, list[float]]:
             "-b:a",
             "128k",
             str(final_audio),
-        ]
+        ],
+        cwd=workflow.build_dir,
     )
     return final_audio, durations
 
@@ -276,10 +291,10 @@ async def render_video(workflow: Workflow, scene_durations: list[float]) -> Path
     list_file = workflow.build_dir / "video_concat.txt"
     with list_file.open("w", encoding="utf-8") as f:
         for segment in segment_paths:
-            safe = segment.resolve().as_posix().replace("'", "'\\''")
-            f.write(f"file '{safe}'\n")
+            rel = segment.relative_to(workflow.build_dir)
+            f.write(f"file '{rel.as_posix()}'\n")
 
-    await run_async([ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(silent_video)])
+    await run_async([ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(silent_video)], cwd=workflow.build_dir)
     return silent_video
 
 
@@ -369,15 +384,27 @@ def write_subtitles(workflow: Workflow, scene_durations: list[float]) -> Path:
 async def mux(workflow: Workflow, video: Path, audio: Path, subtitles: Path | None) -> Path:
     workflow.out_dir.mkdir(parents=True, exist_ok=True)
     out = workflow.out_dir / workflow.output_name
-    cmd = [ffmpeg(), "-y", "-i", str(video), "-i", str(audio)]
     if subtitles is not None:
-        sub_path = str(subtitles).replace("\\", "/").replace(":", "\\:")
-        cmd.extend(["-vf", f"ass={sub_path}"])
-    cmd.extend([
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
-        "-c:a", "aac", "-b:a", "160k", "-shortest", str(out),
-    ])
-    await run_async(cmd)
+        # Two-pass: first mux video+audio, then burn subtitles separately
+        # This avoids all path escaping issues with the ass/subtitles filter
+        tmp_muxed = workflow.build_dir / "muxed_no_sub.mp4"
+        await run_async([
+            ffmpeg(), "-y", "-i", str(video), "-i", str(audio),
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", str(tmp_muxed),
+        ])
+        # Burn subtitles using the subtitles filter with cwd set to subtitle directory
+        await run_async([
+            ffmpeg(), "-y", "-i", str(tmp_muxed),
+            "-vf", f"ass={subtitles.name}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
+            "-c:a", "copy", str(out),
+        ], cwd=subtitles.parent)
+    else:
+        await run_async([
+            ffmpeg(), "-y", "-i", str(video), "-i", str(audio),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
+            "-c:a", "aac", "-b:a", "160k", "-shortest", str(out),
+        ])
     return out
 
 

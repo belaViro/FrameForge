@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-const PROJECT_ROOT = process.env.PROJECT_ROOT || "D:/财富密码/视频号/静态图片科普视频";
+const FILE_ROOT = process.cwd();
 
 interface FileItem {
   name: string;
@@ -44,7 +44,7 @@ export default function AssetsPage() {
 
       <div className="space-y-6">
         {dirs.map((dir) => {
-          const fullDir = path.join(PROJECT_ROOT, dir);
+          const fullDir = path.join(FILE_ROOT, dir);
           const files = listDir(fullDir);
           if (files.length === 0) return null;
 
